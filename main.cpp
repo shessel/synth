@@ -20,6 +20,23 @@ static constexpr size_t SAMPLE_COUNT = static_cast<size_t>(SAMPLE_RATE * NUM_CHA
 static constexpr size_t SAMPLE_OFFSET = 44 / BYTE_PER_SAMPLE; // WAV_HEADER is 44 bytes, so 22 uint16 elements
 static constexpr size_t BUFFER_COUNT = SAMPLE_OFFSET + SAMPLE_COUNT;
 
+using namespace std;
+using namespace Platform;
+using namespace Windows::Foundation;
+using namespace Windows::System;
+using namespace Windows::Media::SpeechSynthesis;
+using namespace Windows::UI::Xaml::Controls;
+using namespace Windows::Storage::Streams;
+// C RunTime Header Files
+#include <stdlib.h>
+#include <malloc.h>
+#include <memory.h>
+#include <tchar.h>
+#include <ppltasks.h>
+
+// TODO: reference additional headers your program requires here
+#include "ROApi.h"
+
 // platform is little-endian, so least significant byte comes first in memory
 // => bytes are reversed when specifying multiple bytes as one int
 static constexpr uint32_t WAV_HEADER[] = {
@@ -65,6 +82,11 @@ float envSq(float period)
     return period * period * 4.0f;
 }
 
+float interpolateLin(float v0, float v1, float x, float x0 = 0.0, float x1 = 1.0)
+{
+    return v0 + (v1 - v0) * (x - x0) / (x1 - x0);
+}
+
 float envAdsr(float period, float attack, float decay, float sustainLevel, float release)
 {
     if (period <= attack)
@@ -85,8 +107,47 @@ float envAdsr(float period, float attack, float decay, float sustainLevel, float
     }
 }
 
+void TTStest() {
+    Windows::Foundation::Initialize();
+    auto synthesizer = ref new SpeechSynthesizer();
+    // Create a stream from the text. This will be played using a media element.
+    //auto stream = synthesizer->SynthesizeTextToStreamAsync("Hallo")->GetResults();
+
+    //auto media = ref new MediaElement();
+
+
+    // The string to speak.
+    String^ text = "Hello World";
+
+    // Generate the audio stream from plain text.
+    Concurrency::task<SpeechSynthesisStream ^> speakTask = Concurrency::create_task(synthesizer->SynthesizeTextToStreamAsync(text));
+    speakTask.then([text](SpeechSynthesisStream ^speechStream)
+    {
+        auto buffer = ref new Buffer(1024*1024);
+        auto writeTask = Concurrency::create_task(speechStream->WriteAsync(buffer));
+        writeTask.then([buffer](unsigned int size) {
+            buffer->GetHashCode();
+        });
+
+        speechStream->FlushAsync();
+        // Send the stream to the media object.
+        // media === MediaElement XAML object.
+        //media->SetSource(speechStream, speechStream->ContentType);
+        //media->AutoPlay = true;
+        //media->Play();
+    });
+
+            ////SpeechSynthesisStream^ synthesisStream = synthesisStreamTask.get();
+            ////
+            ////// Set the source and start playing the synthesized audio stream.
+            //media->AutoPlay = true;
+            //media->SetSource(stream, stream->ContentType);
+            //media->Play();
+}
+
 int main()
 {
+    TTStest();
     static int16_t buffer[BUFFER_COUNT];
     memcpy(buffer, WAV_HEADER, 44);
 
