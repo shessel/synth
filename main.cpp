@@ -85,6 +85,17 @@ float envAdsr(float period, float attack, float decay, float sustainLevel, float
     }
 }
 
+template <typename T>
+void clamp(T& x, const T& min, const T& max) {
+    x = x > max ? max : x;
+    x = x < min ? min : x;
+}
+
+float compress(float x, float threshold, float reduction) {
+    // do dynamic range compression?
+    return x;
+}
+
 int main()
 {
     static int16_t buffer[BUFFER_COUNT];
@@ -95,11 +106,16 @@ int main()
     for (size_t i = SAMPLE_OFFSET; i < BUFFER_COUNT; ++i) {
         int channel = i & 1;
         float t = 0.5f * static_cast<float>(i - SAMPLE_OFFSET) / SAMPLE_RATE;
-        float period = std::modff(t/BEAT_DURATION_SEC, &dummy);
+        float period = std::modff(t / BEAT_DURATION_SEC, &dummy);
         frequency = 220.0f * pow(1.0594631f, dummy);
         float env = envAdsr(period, .1f, .3f, .2f, .7f);
-        float level = 0.6f + 0.4f * std::sinf(0.5f * t * PI + channel * PI);
-        buffer[i] = static_cast<int16_t>(level * env * sin(t, frequency) * 32767);
+        float level = (1.0f/6.0f) * (0.6f + 0.4f * std::sinf(0.5f * t * PI + channel * PI));
+        float sample = level * env * sin(t, frequency);
+        sample += level * env * sin(t, frequency*pow(1.0594631f, 4));
+        sample += level * env * sin(t, frequency*pow(1.0594631f, 7));
+        sample += level * env * sin(t, frequency*pow(1.0594631f, 10));
+        buffer[i] = static_cast<int16_t>(sample * 32767);
+        clamp(buffer[i], int16_t(-32767), int16_t(32767));
     }
 
     PlaySound((LPCTSTR)buffer, nullptr, SND_MEMORY | SND_SYNC);
