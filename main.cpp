@@ -86,14 +86,24 @@ float envAdsr(float period, float attack, float decay, float sustainLevel, float
 }
 
 template <typename T>
-void clamp(T& x, const T& min, const T& max) {
+void clamp(T& x, const T& min, const T& max)
+{
     x = x > max ? max : x;
     x = x < min ? min : x;
 }
 
-float compress(float x, float threshold, float reduction) {
-    // do dynamic range compression?
+float compress(float x, float threshold, float reduction)
+{
+    static float peak = 0.0f;
+    peak = std::fmaxf(std::fabsf(x), peak);
+    x = peak > 1.0f ? x * (1.0f / peak) : x;
+    peak -= 1.0f / (2.0f * 44100.0f);
     return x;
+}
+
+float interpolateLin(float v0, float v1, float x, float x0 = 0.0, float x1 = 1.0)
+{
+    return v0 + (v1 - v0) * (x - x0) / (x1 - x0);
 }
 
 int main()
@@ -109,11 +119,12 @@ int main()
         float period = std::modff(t / BEAT_DURATION_SEC, &dummy);
         frequency = 220.0f * pow(1.0594631f, dummy);
         float env = envAdsr(period, .1f, .3f, .2f, .7f);
-        float level = (1.0f/6.0f) * (0.6f + 0.4f * std::sinf(0.5f * t * PI + channel * PI));
+        float level = (1.0f/1.0f) * (0.6f + 0.4f * std::sinf(0.5f * t * PI + channel * PI));
         float sample = level * env * sin(t, frequency);
         sample += level * env * sin(t, frequency*pow(1.0594631f, 4));
         sample += level * env * sin(t, frequency*pow(1.0594631f, 7));
         sample += level * env * sin(t, frequency*pow(1.0594631f, 10));
+        sample = compress(sample, -1.0f, -1.0f);
         buffer[i] = static_cast<int16_t>(sample * 32767);
         clamp(buffer[i], int16_t(-32767), int16_t(32767));
     }
