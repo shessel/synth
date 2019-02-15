@@ -3,13 +3,16 @@
 
 #include <Windows.h>
 
+#include <iostream>
+#include <vector>
+
 static constexpr float PI = 3.14159265f;
 
 static constexpr uint32_t SAMPLE_RATE = 44100;
 
 static constexpr size_t BPM = 120;
-static constexpr size_t MEASURES = 2;
-static constexpr size_t METER_IN_4TH = 4;
+static constexpr size_t MEASURES = 1;
+static constexpr size_t METER_IN_4TH = 1;
 static constexpr float BEAT_DURATION_SEC = 60.0 / BPM;
 static constexpr size_t BEATS_TOTAL = MEASURES * METER_IN_4TH;
 static constexpr float DURATION_SEC = BEATS_TOTAL * BEAT_DURATION_SEC;
@@ -59,6 +62,16 @@ float envSqrt(float period)
     return sqrtf(2.0f * period);
 }
 
+float envSqDrop(float period)
+{
+    return (1.0f - period) * (1.0f - period);
+}
+
+float envSqrtDrop(float period)
+{
+    return sqrtf(1.0f - period);
+}
+
 float envSq(float period)
 {
     period = period < 0.5 ? period : 1.0f - period;
@@ -94,31 +107,82 @@ void clamp(T& x, const T& min, const T& max) {
 float compress(float x, float threshold, float reduction) {
     // do dynamic range compression?
     return x;
-}
+} 
 
 int main()
 {
     static int16_t buffer[BUFFER_COUNT];
     memcpy(buffer, WAV_HEADER, 44);
 
-    float frequency = 440.0;
-    float dummy;
-    for (size_t i = SAMPLE_OFFSET; i < BUFFER_COUNT; ++i) {
-        int channel = i & 1;
-        float t = 0.5f * static_cast<float>(i - SAMPLE_OFFSET) / SAMPLE_RATE;
-        float period = std::modff(t / BEAT_DURATION_SEC, &dummy);
-        frequency = 220.0f * pow(1.0594631f, dummy);
-        float env = envAdsr(period, .1f, .3f, .2f, .7f);
-        float level = (1.0f/6.0f) * (0.6f + 0.4f * std::sinf(0.5f * t * PI + channel * PI));
-        float sample = level * env * sin(t, frequency);
-        sample += level * env * sin(t, frequency*pow(1.0594631f, 4));
-        sample += level * env * sin(t, frequency*pow(1.0594631f, 7));
-        sample += level * env * sin(t, frequency*pow(1.0594631f, 10));
-        buffer[i] = static_cast<int16_t>(sample * 32767);
-        clamp(buffer[i], int16_t(-32767), int16_t(32767));
-    }
+    std::vector<float> harmonics;
+    std::vector<float> levels;
+    do
+    {
+        {
+            float harmonic;
+            float level;
+            while (true) {
+                std::cin >> harmonic;
+                if (harmonic == 0) break;
+                size_t harmonicPos = harmonics.size();
+                for (size_t i = 0; i < harmonicPos; ++i)
+                {
+                    if (std::fabsf(harmonics[i] - harmonic) < 0.0001f) {
+                        harmonicPos = i;
+                        break;
+                    }
+                }
+                std::cin >> level;
+                clamp(level, -1.0f, 1.0f);
+                if (harmonicPos == harmonics.size())
+                {
+                    harmonics.push_back(harmonic);
+                    levels.push_back(level);
+                }
+                else
+                {
+                    levels[harmonicPos] = level;
+                }
+            }
+        }
 
-    PlaySound((LPCTSTR)buffer, nullptr, SND_MEMORY | SND_SYNC);
+        if (harmonics.size() > 0)
+        {
+            float baseFreq = 220.0f;
+            float frequencies[4] = { 0.0f };
+            frequencies[0] = baseFreq;
+            frequencies[1] = baseFreq * std::powf(1.0594631f, 4);
+            frequencies[2] = baseFreq * std::powf(1.0594631f, 7);
+            frequencies[3] = baseFreq * std::powf(1.0594631f, 5);
+
+            float dummy;
+            for (size_t i = SAMPLE_OFFSET; i < BUFFER_COUNT; ++i)
+            {
+                int channel = i & 1;
+                float t = 0.5f * static_cast<float>(i - SAMPLE_OFFSET) / SAMPLE_RATE;
+                float period = std::modff(t / BEAT_DURATION_SEC, &dummy);
+                float frequency = frequencies[static_cast<size_t>(dummy) % 4];// 220.0f * pow(1.0594631f, dummy);
+                float env = envSqDrop(period);
+                //float env = envAdsr(period, .1f, .3f, .2f, .7f);
+                float level = (1.0f / (2.0f + harmonics.size())) * (0.6f + 0.4f * std::sinf(0.5f * t * PI + channel * PI));
+                float sample = 0.0f;// level * env * sin(t, frequency);
+                for (size_t i = 0; i < harmonics.size(); ++i)
+                {
+                    sample += level * levels[i] * env * square(t, frequency * harmonics[i]);
+                }
+                //sample += level * env * sin(t, frequency * 3);
+                //sample += level * env * sin(t, frequency * 5);
+                //sample += level * env * sin(t, frequency * 9);
+                //sample += level * env * sin(t, frequency*pow(1.0594631f, 4));
+                //sample += level * env * sin(t, frequency*pow(1.0594631f, 7));
+                //sample += level * env * sin(t, frequency*pow(1.0594631f, 10));
+                buffer[i] = static_cast<int16_t>(sample * 32767);
+                clamp(buffer[i], int16_t(-32767), int16_t(32767));
+            }
+
+            PlaySound((LPCTSTR)buffer, nullptr, SND_MEMORY | SND_SYNC);
+        }
+    } while (harmonics.size() > 0);
 
     return 0;
 }
