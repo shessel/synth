@@ -53,6 +53,12 @@ float sin(float t, float frequency)
     return std::sinf(t * frequency * PI * 2.0f);
 }
 
+float kick(float t, float startFreq)
+{
+    // add noise?
+    return std::expf(-4.5*t) * std::sinf(2.0f * PI * startFreq * std::expf(-0.75*t));
+}
+
 float envSqrt(float period)
 {
     period = period < 0.5 ? period : 1.0f - period;
@@ -118,13 +124,13 @@ int main()
         float t = 0.5f * static_cast<float>(i - SAMPLE_OFFSET) / SAMPLE_RATE;
         float period = std::modff(t / BEAT_DURATION_SEC, &dummy);
         frequency = 220.0f * pow(1.0594631f, dummy);
-        float env = envAdsr(period, .1f, .3f, .2f, .7f);
-        float level = (1.0f/1.0f) * (0.6f + 0.4f * std::sinf(0.5f * t * PI + channel * PI));
-        float sample = level * env * sin(t, frequency);
-        sample += level * env * sin(t, frequency*pow(1.0594631f, 4));
-        sample += level * env * sin(t, frequency*pow(1.0594631f, 7));
-        sample += level * env * sin(t, frequency*pow(1.0594631f, 10));
-        sample = compress(sample, -1.0f, -1.0f);
+        float env = envAdsr(period, .001f, 1.0f, 1.0f, 0.0f);
+        float level = (1.0f/3.0f) * (0.6f + 0.4f * std::sinf(0.5f * t * PI + channel * PI));
+        float sample = level * env * kick(period, 40.0f);
+        //sample += level * env * sin(t, frequency*pow(1.0594631f, 4));
+        //sample += level * env * sin(t, frequency*pow(1.0594631f, 7));
+        //sample += level * env * sin(t, frequency*pow(1.0594631f, 10));
+        //sample = compress(sample, -1.0f, -1.0f);
         buffer[i] = static_cast<int16_t>(sample * 32767);
         clamp(buffer[i], int16_t(-32767), int16_t(32767));
     }
