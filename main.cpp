@@ -20,6 +20,8 @@ static constexpr size_t SAMPLE_COUNT = static_cast<size_t>(SAMPLE_RATE * NUM_CHA
 static constexpr size_t SAMPLE_OFFSET = 44 / BYTE_PER_SAMPLE; // WAV_HEADER is 44 bytes, so 22 uint16 elements
 static constexpr size_t BUFFER_COUNT = SAMPLE_OFFSET + SAMPLE_COUNT;
 
+static float noise_buffer[SAMPLE_RATE];
+
 // platform is little-endian, so least significant byte comes first in memory
 // => bytes are reversed when specifying multiple bytes as one int
 static constexpr uint32_t WAV_HEADER[] = {
@@ -53,10 +55,38 @@ float sin(float t, float frequency)
     return std::sinf(t * frequency * PI * 2.0f);
 }
 
-float kick(float t, float startFreq)
+float rand(float x)
 {
-    // add noise?
-    return std::expf(-4.5*t) * std::sinf(2.0f * PI * startFreq * std::expf(-0.75*t));
+    float dummy;
+    return std::modff(std::sin(x*2357911.13f)*1113171.9f, &dummy);
+}
+
+void initNoiseBuffer()
+{
+    static bool initialized = false;
+    if (!initialized) {
+        std::srand(42);
+    }
+
+    for (size_t i = 0; i < SAMPLE_RATE; ++i)
+    {
+        noise_buffer[i] = -1.0f + 2.0f * (static_cast<float>(std::rand()) / RAND_MAX);
+    }
+
+    initialized = true;
+}
+
+float noise(float t, float freq)
+{
+    //static bool initialized = false;
+    //if (!initialized) {
+    //    std::srand(42);
+    //    initialized = true;
+    //}
+    //return -1.0f + 2.0f * (static_cast<float>(std::rand()) / RAND_MAX);
+    float dummy;
+    float frac = std::modff(t * freq, &dummy);
+    return noise_buffer[static_cast<size_t>(t * freq)];
 }
 
 float envSqrt(float period)
@@ -102,7 +132,7 @@ float compress(float x, float threshold, float reduction)
 {
     static float peak = 0.0f;
     peak = std::fmaxf(std::fabsf(x), peak);
-    x = peak > 1.0f ? x * (1.0f / peak) : x;
+    x = peak > threshold ? x * (1.0f / reduction) : x;
     peak -= 1.0f / (2.0f * 44100.0f);
     return x;
 }
@@ -112,8 +142,29 @@ float interpolateLin(float v0, float v1, float x, float x0 = 0.0, float x1 = 1.0
     return v0 + (v1 - v0) * (x - x0) / (x1 - x0);
 }
 
+float kick(float t, float startFreq)
+{
+    // add noise?
+    float env = std::expf(-1.5*t);
+    float freqFalloff = std::expf(-0.45*t);
+    // float lowBoom = env * square(t, 40.0f * freqFalloff);
+    float lowBoom = env * std::sinf(2.0f * PI * 60.0f * freqFalloff);
+
+    float punchT = t * 400.0f;
+    float punchFalloff = std::expf(-0.95*punchT);
+    clamp(punchT, 0.0f, 1.0f);
+    float punch = punchFalloff * noise(t, 240.0) * 0.7f;
+
+    float slapT = t * 400.0f;
+    float slapFalloff = std::expf(-0.25*slapT);
+    clamp(slapT, 0.0f, 1.0f);
+    float slap = slapFalloff * noise(t, 5000.0) * 0.3f;
+    return 1.0f * (lowBoom + punch + slap);
+}
+
 int main()
 {
+    initNoiseBuffer();
     static int16_t buffer[BUFFER_COUNT];
     memcpy(buffer, WAV_HEADER, 44);
 
@@ -124,13 +175,19 @@ int main()
         float t = 0.5f * static_cast<float>(i - SAMPLE_OFFSET) / SAMPLE_RATE;
         float period = std::modff(t / BEAT_DURATION_SEC, &dummy);
         frequency = 220.0f * pow(1.0594631f, dummy);
+        //float env = envAdsr(period, .1f, .3f, .2f, .7f);
         float env = envAdsr(period, .001f, 1.0f, 1.0f, 0.0f);
-        float level = (1.0f/3.0f) * (0.6f + 0.4f * std::sinf(0.5f * t * PI + channel * PI));
-        float sample = level * env * kick(period, 40.0f);
+        float level = (1.0f / 3.0f);// *(0.6f + 0.4f * std::sinf(0.5f * t * PI + channel * PI));
+        float sample = level * env * kick(period, 60.0f);
+        //sample += level * env * kick(std::modf(period + 0.25f, &dummy), 60.0f);
+        //sample += level * env * kick(std::modf(period + 0.5f, &dummy), 60.0f);
+        //sample += level * env * kick(std::modf(period + 0.75f, &dummy), 60.0f);
+        //sample += level * env * sin(t, frequency*pow(1.0594631f, 4));
+        // sample += level * 0.25 * noise(period, 20.0f);
         //sample += level * env * sin(t, frequency*pow(1.0594631f, 4));
         //sample += level * env * sin(t, frequency*pow(1.0594631f, 7));
         //sample += level * env * sin(t, frequency*pow(1.0594631f, 10));
-        //sample = compress(sample, -1.0f, -1.0f);
+        //sample = compress(sample, 0.8f, 4.0f);
         buffer[i] = static_cast<int16_t>(sample * 32767);
         clamp(buffer[i], int16_t(-32767), int16_t(32767));
     }
