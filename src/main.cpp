@@ -84,8 +84,8 @@ float noise(float t, float freq)
     //    initialized = true;
     //}
     //return -1.0f + 2.0f * (static_cast<float>(std::rand()) / RAND_MAX);
-    float dummy;
-    float frac = std::modff(t * freq, &dummy);
+    //float dummy;
+    //float frac = std::modff(t * freq, &dummy);
     return noise_buffer[static_cast<size_t>(t * freq)];
 }
 
@@ -142,21 +142,21 @@ float interpolateLin(float v0, float v1, float x, float x0 = 0.0, float x1 = 1.0
     return v0 + (v1 - v0) * (x - x0) / (x1 - x0);
 }
 
-float kick(float t, float startFreq)
+float kick(float t, float /*startFreq*/)
 {
     // add noise?
-    float env = std::expf(-1.5*t);
-    float freqFalloff = std::expf(-0.45*t);
+    float env = std::expf(-1.5f*t);
+    float freqFalloff = std::expf(-0.45f*t);
     // float lowBoom = env * square(t, 40.0f * freqFalloff);
     float lowBoom = env * std::sinf(2.0f * PI * 60.0f * freqFalloff);
 
     float punchT = t * 400.0f;
-    float punchFalloff = std::expf(-0.95*punchT);
+    float punchFalloff = std::expf(-0.95f*punchT);
     clamp(punchT, 0.0f, 1.0f);
-    float punch = punchFalloff * noise(t, 240.0) * 0.7f;
+    float punch = punchFalloff * noise(t, 240.0f) * 0.7f;
 
     float slapT = t * 400.0f;
-    float slapFalloff = std::expf(-0.25*slapT);
+    float slapFalloff = std::expf(-0.25f*slapT);
     clamp(slapT, 0.0f, 1.0f);
     float slap = slapFalloff * noise(t, 5000.0) * 0.3f;
     return 1.0f * (lowBoom + punch + slap);
@@ -171,7 +171,7 @@ int main()
     float frequency = 440.0;
     float dummy;
     for (size_t i = SAMPLE_OFFSET; i < BUFFER_COUNT; ++i) {
-        int channel = i & 1;
+        //int channel = i & 1;
         float t = 0.5f * static_cast<float>(i - SAMPLE_OFFSET) / SAMPLE_RATE;
         float period = std::modff(t / BEAT_DURATION_SEC, &dummy);
         frequency = 220.0f * pow(1.0594631f, dummy);
@@ -211,7 +211,7 @@ int main()
     //hdr.dwFlags = WHDR_BEGINLOOP | WHDR_ENDLOOP;
     waveOutPrepareHeader(hwo, &hdr, sizeof(WAVEHDR));
     waveOutWrite(hwo, &hdr, sizeof(WAVEHDR));
-    Sleep(DURATION_SEC * 1000 + 50);
+    Sleep(static_cast<DWORD>(DURATION_SEC * 1000 + 50));
     waveOutUnprepareHeader(hwo, &hdr, sizeof(WAVEHDR));
     waveOutClose(hwo);
 
