@@ -192,7 +192,28 @@ int main()
         clamp(buffer[i], int16_t(-32767), int16_t(32767));
     }
 
-    PlaySound((LPCTSTR)buffer, nullptr, SND_MEMORY | SND_SYNC);
+    initNoiseBuffer();
+    WAVEFORMATEX fmt{};
+    fmt.wBitsPerSample = 16;
+    fmt.wFormatTag = WAVE_FORMAT_PCM;
+    fmt.nChannels = NUM_CHANNELS;
+    fmt.nSamplesPerSec = SAMPLE_RATE;
+    fmt.nAvgBytesPerSec = SAMPLE_RATE * NUM_CHANNELS * BYTE_PER_SAMPLE;
+    fmt.nBlockAlign = NUM_CHANNELS * BYTE_PER_SAMPLE;
+
+    HWAVEOUT hwo = 0;
+    waveOutOpen(&hwo, WAVE_MAPPER, &fmt, 0, 0, CALLBACK_NULL);
+
+    WAVEHDR hdr = {};
+    //hdr.dwLoops = static_cast<DWORD>(-1);
+    hdr.lpData =  reinterpret_cast<LPSTR>(buffer) + 44;
+    hdr.dwBufferLength = BUFFER_COUNT * sizeof(int16_t) - 44;
+    //hdr.dwFlags = WHDR_BEGINLOOP | WHDR_ENDLOOP;
+    waveOutPrepareHeader(hwo, &hdr, sizeof(WAVEHDR));
+    waveOutWrite(hwo, &hdr, sizeof(WAVEHDR));
+    Sleep(DURATION_SEC * 1000 + 50);
+    waveOutUnprepareHeader(hwo, &hdr, sizeof(WAVEHDR));
+    waveOutClose(hwo);
 
     return 0;
 }
