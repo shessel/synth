@@ -1,7 +1,11 @@
 #include <cstdint>
 #include <cmath>
+#include <cstring>
 
-#include <Windows.h>
+#include <chrono>
+#include <thread>
+
+#include "synth.h"
 
 static constexpr float PI = 3.14159265f;
 
@@ -165,8 +169,9 @@ float kick(float t, float /*startFreq*/)
 int main()
 {
     initNoiseBuffer();
+    open_device(NUM_CHANNELS, SAMPLE_RATE, BYTE_PER_SAMPLE);
     static int16_t buffer[BUFFER_COUNT];
-    memcpy(buffer, WAV_HEADER, 44);
+    std::memcpy(buffer, WAV_HEADER, 44);
 
     float frequency = 440.0;
     float dummy;
@@ -192,28 +197,21 @@ int main()
         clamp(buffer[i], int16_t(-32767), int16_t(32767));
     }
 
-    initNoiseBuffer();
-    WAVEFORMATEX fmt{};
-    fmt.wBitsPerSample = 16;
-    fmt.wFormatTag = WAVE_FORMAT_PCM;
-    fmt.nChannels = NUM_CHANNELS;
-    fmt.nSamplesPerSec = SAMPLE_RATE;
-    fmt.nAvgBytesPerSec = SAMPLE_RATE * NUM_CHANNELS * BYTE_PER_SAMPLE;
-    fmt.nBlockAlign = NUM_CHANNELS * BYTE_PER_SAMPLE;
-
-    HWAVEOUT hwo = 0;
-    waveOutOpen(&hwo, WAVE_MAPPER, &fmt, 0, 0, CALLBACK_NULL);
-
-    WAVEHDR hdr = {};
-    //hdr.dwLoops = static_cast<DWORD>(-1);
-    hdr.lpData =  reinterpret_cast<LPSTR>(buffer) + 44;
-    hdr.dwBufferLength = BUFFER_COUNT * sizeof(int16_t) - 44;
-    //hdr.dwFlags = WHDR_BEGINLOOP | WHDR_ENDLOOP;
-    waveOutPrepareHeader(hwo, &hdr, sizeof(WAVEHDR));
-    waveOutWrite(hwo, &hdr, sizeof(WAVEHDR));
-    Sleep(static_cast<DWORD>(DURATION_SEC * 1000 + 50));
-    waveOutUnprepareHeader(hwo, &hdr, sizeof(WAVEHDR));
-    waveOutClose(hwo);
+    play_sound(buffer + 44, BUFFER_COUNT - 44);
+    play_sound(buffer + 44, BUFFER_COUNT - 44);
+    play_sound(buffer + 44, BUFFER_COUNT - 44);
+    play_sound(buffer + 44, BUFFER_COUNT - 44);
+    play_sound(buffer + 44, BUFFER_COUNT - 44);
+    play_sound(buffer + 44, BUFFER_COUNT - 44);
+    play_sound(buffer + 44, BUFFER_COUNT - 44);
+    play_sound(buffer + 44, BUFFER_COUNT - 44);
+    for (size_t i = 0; i < 10; ++i)
+    {
+        play_sound(buffer + 44, BUFFER_COUNT - 44);
+        play_sound(buffer + 44, BUFFER_COUNT - 44);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    }
+    close_device();
 
     return 0;
 }
