@@ -1,6 +1,8 @@
-# Visual Studio files
+# Visual Studio file and directoriess
 *.vcxproj
 *.filters
 *.user
+CMakeSettings.json
 
+.vs
 [Dd]ebug
