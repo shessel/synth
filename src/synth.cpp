@@ -3,6 +3,8 @@
 #include <atomic>
 #include <iostream>
 
+#include "synth.h"
+
 static HWAVEOUT hwo = 0;
 
 static constexpr uint8_t NUM_HEADERS = 8;
@@ -21,7 +23,6 @@ void CALLBACK waveOutProc(
     {
     case WOM_CLOSE:
         std::cout << "[callback] device closed" << std::endl;
-
         break;
     case WOM_OPEN:
         std::cout << "[callback] device opened" << std::endl;
