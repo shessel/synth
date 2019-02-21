@@ -50,6 +50,19 @@ static constexpr uint32_t WAV_HEADER[] = {
     SAMPLE_COUNT * BYTE_PER_SAMPLE,// SubChunkSize, size of sub chunk, excluding the first two 4-byte fields
 };
 
+template <typename T>
+void clamp(T& x, const T& min, const T& max)
+{
+    x = x > max ? max : x;
+    x = x < min ? min : x;
+}
+
+float interpolate(float v0, float v1, float x, float x0 = 0.0, float x1 = 1.0)
+{
+    float fac = x / (x1 - x0);
+    return (1.0f - fac) * v0 + fac * v1;
+}
+
 float square(float t, float frequency, float flip = 0.5f)
 {
     float dummy;
@@ -84,15 +97,15 @@ void initNoiseBuffer()
 
 float noise(float t, float freq)
 {
-    //static bool initialized = false;
-    //if (!initialized) {
-    //    std::srand(42);
-    //    initialized = true;
-    //}
-    //return -1.0f + 2.0f * (static_cast<float>(std::rand()) / RAND_MAX);
-//    float dummy;
-//    float frac = std::modff(t * freq, &dummy);
-    return noise_buffer[static_cast<size_t>(t * freq)];
+    clamp(t, 0.0f, 1.0f);
+    clamp(freq, 0.0f, static_cast<float>(SAMPLE_RATE));
+    float noiseT = t * freq;
+    size_t i = static_cast<size_t>(noiseT);
+    float fac = noiseT - i;
+    float n0 = noise_buffer[i];
+    float n1 = noise_buffer[(i+1)%SAMPLE_RATE];
+
+    return interpolate(n0, n1, fac);
 }
 
 float envSqrt(float period)
@@ -127,13 +140,6 @@ float envAdsr(float period, float attack, float decay, float sustainLevel, float
     }
 }
 
-template <typename T>
-void clamp(T& x, const T& min, const T& max)
-{
-    x = x > max ? max : x;
-    x = x < min ? min : x;
-}
-
 float compress(float x, float threshold, float reduction)
 {
     static float peak = 0.0f;
@@ -143,23 +149,16 @@ float compress(float x, float threshold, float reduction)
     return x;
 }
 
-float interpolateLin(float v0, float v1, float x, float x0 = 0.0, float x1 = 1.0)
+float kick(float t, float startFreq)
 {
-    return v0 + (v1 - v0) * (x - x0) / (x1 - x0);
-}
-
-float kick(float t, float /*startFreq*/)
-{
-    // add noise?
     float env = std::expf(-1.5f*t);
     float freqFalloff = std::expf(-0.45f*t);
-    // float lowBoom = env * square(t, 40.0f * freqFalloff);
-    float lowBoom = env * std::sinf(2.0f * PI * 60.0f * freqFalloff);
+    float lowBoom = env * std::sinf(2.0f * PI * startFreq * freqFalloff);
 
     float punchT = t * 400.0f;
-    float punchFalloff = std::expf(-0.95f*punchT);
+    float punchEnv = std::expf(-0.95f*punchT);
     clamp(punchT, 0.0f, 1.0f);
-    float punch = punchFalloff * noise(t, 240.0) * 0.7f;
+    float punch = punchEnv * noise(t, 240.0) * 0.7f;
 
     float slapT = t * 400.0f;
     float slapFalloff = std::expf(-0.25f*slapT);
@@ -185,9 +184,9 @@ void synth_generate(ADSR adsr)
 {
     float frequency = 440.0;
     float dummy;
-    for (size_t i = SAMPLE_OFFSET; i < BUFFER_COUNT; ++i) {
+    for (size_t i = 0; i < BUFFER_COUNT; ++i) {
         //int channel = i & 1;
-        float t = 0.5f * static_cast<float>(i - SAMPLE_OFFSET) / SAMPLE_RATE;
+        float t = static_cast<float>(i / NUM_CHANNELS) / SAMPLE_RATE;
         float period = std::modff(t / BEAT_DURATION_SEC, &dummy);
         frequency = 220.0f * pow(1.0594631f, dummy);
         //float env = envAdsr(period, .1f, .3f, .2f, .7f);
