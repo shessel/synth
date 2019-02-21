@@ -123,7 +123,7 @@ float envAdsr(float period, float attack, float decay, float sustainLevel, float
     }
     else
     {
-        return sustainLevel - sustainLevel * (period - release) / (1.0f - release);
+        return sustainLevel - sustainLevel * (period - release) / max(1.0f - release, 0.00001f);
     }
 }
 
