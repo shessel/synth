@@ -2,10 +2,12 @@ cmake_minimum_required(VERSION 3.12)
 
 set(SOURCE_FILES
 		synth.cpp
+		sound.cpp
 	)
 
 set(HEADER_FILES
 		synth.h
+		sound.h
 	)
 
 add_executable(synth-main main.cpp)
