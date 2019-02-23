@@ -18,11 +18,12 @@ static constexpr float BEAT_DURATION_SEC = 60.0 / BPM;
 static constexpr size_t BEATS_TOTAL = MEASURES * METER_IN_4TH;
 static constexpr float DURATION_SEC = BEATS_TOTAL * BEAT_DURATION_SEC;
 static constexpr size_t NUM_CHANNELS = 2;
-static constexpr size_t BYTE_PER_SAMPLE = 2;
-static constexpr size_t BITS_PER_SAMPLE = BYTE_PER_SAMPLE * 8;
+static constexpr size_t BYTES_PER_SAMPLE = 2;
+static constexpr size_t BITS_PER_SAMPLE = BYTES_PER_SAMPLE * 8;
 static constexpr size_t SAMPLES_PER_ROW = static_cast<size_t>(SAMPLE_RATE * BEAT_DURATION_SEC);
+static constexpr size_t SAMPLES_PER_TRACK = ROWS_PER_TRACK * SAMPLES_PER_ROW;
 static constexpr size_t SAMPLE_COUNT = static_cast<size_t>(SAMPLE_RATE * NUM_CHANNELS * DURATION_SEC);
-static constexpr size_t SAMPLE_OFFSET = 0;// 44 / BYTE_PER_SAMPLE; // WAV_HEADER is 44 bytes, so 22 uint16 elements
+static constexpr size_t SAMPLE_OFFSET = 0;// 44 / BYTES_PER_SAMPLE; // WAV_HEADER is 44 bytes, so 22 uint16 elements
 static constexpr size_t BUFFER_COUNT = SAMPLE_OFFSET + SAMPLE_COUNT;
 
 static float noise_buffer[SAMPLE_RATE];
@@ -32,7 +33,7 @@ static float noise_buffer[SAMPLE_RATE];
 static constexpr uint32_t WAV_HEADER[] = {
     // Main chunk
     0x46464952, // ChunkId = "RIFF"
-    BUFFER_COUNT * BYTE_PER_SAMPLE - 8,// ChunkSize, size of the main chunk, excluding the first two 4-byte fields
+    BUFFER_COUNT * BYTES_PER_SAMPLE - 8,// ChunkSize, size of the main chunk, excluding the first two 4-byte fields
     0x45564157, // Format = "WAVE"
     // WAVE format has 2 sub chunks, fmt and data
 
@@ -41,12 +42,12 @@ static constexpr uint32_t WAV_HEADER[] = {
     16, // SubChunkSize, size of sub chunk, excluding the first two 4-byte fields
     NUM_CHANNELS << 16 | 1, // 2 bytes AudioFormat = 1 for PCM, 2 bytes NumChannels,
     SAMPLE_RATE, // SampleRate
-    SAMPLE_RATE * NUM_CHANNELS * BYTE_PER_SAMPLE, // ByteRate = SampleRate * NumChannels * BytesPerSample
-    BITS_PER_SAMPLE << 16 | NUM_CHANNELS * BYTE_PER_SAMPLE, // 2 bytes BlockAlign = NumChannels * BytesPerSample, 2 bytes BitsPerSample
+    SAMPLE_RATE * NUM_CHANNELS * BYTES_PER_SAMPLE, // ByteRate = SampleRate * NumChannels * BytesPerSample
+    BITS_PER_SAMPLE << 16 | NUM_CHANNELS * BYTES_PER_SAMPLE, // 2 bytes BlockAlign = NumChannels * BytesPerSample, 2 bytes BitsPerSample
 
     // Sub chunk data
     0x61746164, // SubChunkId = "data"
-    SAMPLE_COUNT * BYTE_PER_SAMPLE,// SubChunkSize, size of sub chunk, excluding the first two 4-byte fields
+    SAMPLE_COUNT * BYTES_PER_SAMPLE,// SubChunkSize, size of sub chunk, excluding the first two 4-byte fields
 };
 
 template <typename T>
@@ -244,7 +245,7 @@ float annoying(float t, float startFreq)
 void synth_init()
 {
     initNoiseBuffer();
-    sound_open_device(SAMPLE_RATE, BYTE_PER_SAMPLE, NUM_CHANNELS);
+    sound_open_device(SAMPLE_RATE, BYTES_PER_SAMPLE, NUM_CHANNELS);
 }
 
 void synth_deinit()
@@ -252,7 +253,7 @@ void synth_deinit()
     sound_close_device();
 }
 
-int16_t buffer[BUFFER_COUNT];
+static int16_t s_buffer[BUFFER_COUNT];
 
 void synth_generate(ADSR adsr)
 {
@@ -266,8 +267,8 @@ void synth_generate(ADSR adsr)
         float level = (1.0f / 3.0f);
         float sample = level * env * kick(period, 60.0f);
         //sample = compress(sample, 0.8f, 4.0f);
-        buffer[i] = static_cast<int16_t>(sample * 32767);
-        clamp(buffer[i], int16_t(-32767), int16_t(32767));
+        s_buffer[i] = static_cast<int16_t>(sample * 32767);
+        clamp(s_buffer[i], int16_t(-32767), int16_t(32767));
     }
 }
 
@@ -281,11 +282,11 @@ static constexpr sample_func samples[] = {
     noise,
 };
 
-void synth_generate(const track& track)
+int16_t* synth_generate_track(const track& track)
 {
-    const size_t buffer_size = static_cast<size_t>(ROWS_PER_TRACK * SAMPLE_RATE * BEAT_DURATION_SEC * NUM_CHANNELS);
-    uint16_t *track_buffer = new uint16_t[buffer_size];
-    uint16_t *current_sample = track_buffer;
+    const size_t buffer_size = static_cast<size_t>(SAMPLES_PER_TRACK * NUM_CHANNELS);
+    int16_t *track_buffer = new int16_t[buffer_size];
+    int16_t *current_sample = track_buffer;
     for (const auto& row : track.rows)
     {
         for (size_t i = 0; i < SAMPLES_PER_ROW; ++i)
@@ -298,10 +299,20 @@ void synth_generate(const track& track)
         }
     }
 
-    sound_queue_buffer(track_buffer, buffer_size * BYTE_PER_SAMPLE);
+    return track_buffer;
 }
 
-void synth_play()
+void synth_queue_track(int16_t* track_buffer, uint32_t loop_count)
 {
-    sound_queue_buffer(buffer, BUFFER_COUNT * 2);
+    synth_play(track_buffer, SAMPLES_PER_TRACK * NUM_CHANNELS * BYTES_PER_SAMPLE, loop_count);
+}
+
+void synth_play(int16_t* buffer, uint32_t buffer_size, uint32_t loop_count)
+{
+    if (!buffer)
+    {
+        buffer = s_buffer;
+        buffer_size = BUFFER_COUNT * BYTES_PER_SAMPLE;
+    }
+    sound_queue_buffer(buffer, buffer_size, loop_count);
 }

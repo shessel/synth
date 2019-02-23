@@ -26,8 +26,10 @@ int main()
             {554.46f, 4u},
         }
     };
-    synth_generate(track);
+    int16_t* track_buffer = synth_generate_track(track);
+    synth_queue_track(track_buffer, 2);
     synth_deinit();
+    delete[] track_buffer;
 
     return 0;
 }
