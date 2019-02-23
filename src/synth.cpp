@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <cmath>
+#include <cstring>
 
 #include <Windows.h>
 
@@ -125,8 +126,9 @@ float compress(float x, float threshold, float reduction)
     return x;
 }
 
-float square(float t, float frequency, float flip = 0.5f)
+float square(float t, float frequency)
 {
+    float flip = 0.5f;
     float dummy;
     return std::modff(t * frequency, &dummy) < flip ? -1.0f : 1.0f;
 }
@@ -302,9 +304,55 @@ int16_t* synth_generate_track(const track& track)
     return track_buffer;
 }
 
+static constexpr sample_func base_sounds[] = {
+    sin,
+    square,
+    noise,
+};
+
+using modifier_func = float(*)(float t);
+static constexpr modifier_func base_modifiers[] = {
+    envSq,
+    envSqrt,
+    // exp(-x) is 0.01 at x=4.60517
+    [](float t) -> float { return (1.0f/0.99f) * std::expf(-t*4.60517f) - 0.01f; },
+};
+
+int16_t* synth_generate_sound(const sound_desc* sound_desc, uint8_t num_sound_descs)
+{
+    size_t sample_count = static_cast<size_t>(SAMPLE_RATE * BEAT_DURATION_SEC);
+    size_t buffer_count = sample_count * NUM_CHANNELS;
+    int16_t* sound_buffer = new int16_t[buffer_count];
+    std::memset(sound_buffer, 0, buffer_count * BYTES_PER_SAMPLE);
+
+    for (size_t s = 0; s < sample_count; ++s)
+    {
+        for (uint8_t i = 0; i < num_sound_descs; ++i)
+        {
+            float t = static_cast<float>(s) / sample_count;
+            float sample = base_sounds[sound_desc[i].base_sound_id](t, 440.0f);
+            sample *= sound_desc[i].amplitude;
+            float amplitude_modifier_t = interpolate(0.0f, 1.0f, t, sound_desc[i].amplitude_modifier_params.begin, sound_desc[i].amplitude_modifier_params.end);
+            float amplitude_modifier = base_modifiers[sound_desc[i].amplitude_modifier_id](amplitude_modifier_t);
+            sample *= amplitude_modifier;
+            for (uint8_t c = 0; c < NUM_CHANNELS; ++c)
+            {
+                sound_buffer[s * NUM_CHANNELS + c] += static_cast<int16_t>(sample * 32767);
+            }
+        }
+    }
+
+    return sound_buffer;
+}
+
 void synth_queue_track(int16_t* track_buffer, uint32_t loop_count)
 {
     synth_play(track_buffer, SAMPLES_PER_TRACK * NUM_CHANNELS * BYTES_PER_SAMPLE, loop_count);
+}
+
+void synth_queue_sound(int16_t* sound_buffer, uint32_t loop_count)
+{
+    synth_play(sound_buffer, static_cast<uint32_t>(SAMPLE_RATE * BEAT_DURATION_SEC * NUM_CHANNELS * BYTES_PER_SAMPLE), loop_count);
 }
 
 void synth_play(int16_t* buffer, uint32_t buffer_size, uint32_t loop_count)
