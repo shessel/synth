@@ -4,8 +4,6 @@
 
 #include <cstdint>
 #include <cmath>
-#include <thread>
-#include <deque>
 
 #include <Windows.h>
 
@@ -63,17 +61,6 @@ float interpolate(float v0, float v1, float x, float x0 = 0.0, float x1 = 1.0)
     return (1.0f - fac) * v0 + fac * v1;
 }
 
-float square(float t, float frequency, float flip = 0.5f)
-{
-    float dummy;
-    return std::modff(t * frequency, &dummy) < flip ? -1.0f : 1.0f;
-}
-
-float sin(float t, float frequency)
-{
-    return std::sinf(t * frequency * PI * 2.0f);
-}
-
 float rand(float x)
 {
     float dummy;
@@ -93,19 +80,6 @@ void initNoiseBuffer()
     }
 
     initialized = true;
-}
-
-float noise(float t, float freq)
-{
-    clamp(t, 0.0f, 1.0f);
-    clamp(freq, 0.0f, static_cast<float>(SAMPLE_RATE));
-    float noiseT = t * freq;
-    size_t i = static_cast<size_t>(noiseT);
-    float fac = noiseT - i;
-    float n0 = noise_buffer[i];
-    float n1 = noise_buffer[(i+1)%SAMPLE_RATE];
-
-    return interpolate(n0, n1, fac);
 }
 
 float envSqrt(float period)
@@ -149,11 +123,42 @@ float compress(float x, float threshold, float reduction)
     return x;
 }
 
+float square(float t, float frequency, float flip = 0.5f)
+{
+    float dummy;
+    return std::modff(t * frequency, &dummy) < flip ? -1.0f : 1.0f;
+}
+
+float sin(float t, float frequency)
+{
+    return std::sinf(t * frequency * PI * 2.0f);
+}
+
+float silence(float /*t*/, float /*freq*/)
+{
+    return 0.0f;
+}
+
+float noise(float t, float freq)
+{
+    clamp(t, 0.0f, 1.0f);
+    clamp(freq, 0.0f, static_cast<float>(SAMPLE_RATE));
+    float noiseT = t * freq;
+    size_t i = static_cast<size_t>(noiseT);
+    float fac = noiseT - i;
+    float n0 = noise_buffer[i];
+    float n1 = noise_buffer[(i + 1) % SAMPLE_RATE];
+
+    return interpolate(n0, n1, fac);
+}
+
 float kick(float t, float startFreq)
 {
-    float env = std::expf(-1.5f*t);
+    float env = envAdsr(t, 0.0f, 0.0f, 1.0f, 0.95f);
+
+    float lowBoomEnv = std::expf(-1.5f*t);
     float freqFalloff = std::expf(-0.45f*t);
-    float lowBoom = env * std::sinf(2.0f * PI * startFreq * freqFalloff);
+    float lowBoom = lowBoomEnv * std::sinf(2.0f * PI * startFreq * freqFalloff);
 
     float punchT = t * 400.0f;
     float punchEnv = std::expf(-0.95f*punchT);
@@ -164,7 +169,8 @@ float kick(float t, float startFreq)
     float slapFalloff = std::expf(-0.25f*slapT);
     clamp(slapT, 0.0f, 1.0f);
     float slap = slapFalloff * noise(t, 5000.0f) * 0.3f;
-    return 1.0f * (lowBoom + punch + slap);
+
+    return env * (lowBoom + punch + slap);
 }
 
 void synth_init()
@@ -185,22 +191,12 @@ void synth_generate(ADSR adsr)
     float frequency = 440.0;
     float dummy;
     for (size_t i = 0; i < BUFFER_COUNT; ++i) {
-        //int channel = i & 1;
         float t = static_cast<float>(i / NUM_CHANNELS) / SAMPLE_RATE;
         float period = std::modff(t / BEAT_DURATION_SEC, &dummy);
         frequency = 220.0f * pow(1.0594631f, dummy);
-        //float env = envAdsr(period, .1f, .3f, .2f, .7f);
         float env = envAdsr(period, adsr.a, adsr.d, adsr.s, adsr.r);
-        float level = (1.0f / 3.0f);// *(0.6f + 0.4f * std::sinf(0.5f * t * PI + channel * PI));
+        float level = (1.0f / 3.0f);
         float sample = level * env * kick(period, 60.0f);
-        //sample += level * env * kick(std::modf(period + 0.25f, &dummy), 60.0f);
-        //sample += level * env * kick(std::modf(period + 0.5f, &dummy), 60.0f);
-        //sample += level * env * kick(std::modf(period + 0.75f, &dummy), 60.0f);
-        //sample += level * env * sin(t, frequency*pow(1.0594631f, 4));
-        // sample += level * 0.25 * noise(period, 20.0f);
-        //sample += level * env * sin(t, frequency*pow(1.0594631f, 4));
-        //sample += level * env * sin(t, frequency*pow(1.0594631f, 7));
-        //sample += level * env * sin(t, frequency*pow(1.0594631f, 10));
         //sample = compress(sample, 0.8f, 4.0f);
         buffer[i] = static_cast<int16_t>(sample * 32767);
         clamp(buffer[i], int16_t(-32767), int16_t(32767));
