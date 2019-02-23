@@ -20,6 +20,7 @@ static constexpr float DURATION_SEC = BEATS_TOTAL * BEAT_DURATION_SEC;
 static constexpr size_t NUM_CHANNELS = 2;
 static constexpr size_t BYTE_PER_SAMPLE = 2;
 static constexpr size_t BITS_PER_SAMPLE = BYTE_PER_SAMPLE * 8;
+static constexpr size_t SAMPLES_PER_ROW = static_cast<size_t>(SAMPLE_RATE * BEAT_DURATION_SEC);
 static constexpr size_t SAMPLE_COUNT = static_cast<size_t>(SAMPLE_RATE * NUM_CHANNELS * DURATION_SEC);
 static constexpr size_t SAMPLE_OFFSET = 0;// 44 / BYTE_PER_SAMPLE; // WAV_HEADER is 44 bytes, so 22 uint16 elements
 static constexpr size_t BUFFER_COUNT = SAMPLE_OFFSET + SAMPLE_COUNT;
@@ -173,6 +174,73 @@ float kick(float t, float startFreq)
     return env * (lowBoom + punch + slap);
 }
 
+float hihat(float t, float startFreq)
+{
+    float env = envAdsr(t, 0.0f, 0.0f, 1.0f, 0.95f);
+
+    float punchT = t * 80.0f;
+    float punchEnv = std::expf(-0.65f*punchT);
+    clamp(punchT, 0.0f, 1.0f);
+    float punch = punchEnv * noise(t, startFreq) * 0.7f;
+
+    float slapT = t * 200.0f;
+    float slapFalloff = std::expf(-0.45f*slapT);
+    clamp(slapT, 0.0f, 1.0f);
+    float slap = slapFalloff * noise(t, 2000.0f) * 0.3f;
+
+    return env * (punch + slap);
+}
+
+float snare(float t, float startFreq)
+{
+    float env = envAdsr(t, 0.0f, 0.0f, 1.0f, 0.95f);
+
+    float punchEnv = std::expf(-11.0f*t);
+    float punch = punchEnv * noise(t, startFreq);
+
+    float slapT = t * 200.0f;
+    float slapFalloff = std::expf(-0.45f*slapT);
+    float slap = slapFalloff * noise(t, 6000.0f) * 0.3f;
+
+    float slap2T = t * 100.0f;
+    float slap2Falloff = std::expf(-0.45f*slap2T);
+    float slap2 = slap2Falloff * noise(t, 8000.0f) * 0.3f;
+
+    return env * (punch + slap + slap2);
+}
+
+static constexpr float semitone = 1.0594631f;
+static constexpr float note_multipliers[] = {
+    1.0f,
+    semitone,
+    semitone * semitone,
+    semitone * semitone * semitone,
+    semitone * semitone * semitone * semitone,
+    semitone * semitone * semitone * semitone * semitone,
+    semitone * semitone * semitone * semitone * semitone * semitone,
+    semitone * semitone * semitone * semitone * semitone * semitone * semitone,
+    semitone * semitone * semitone * semitone * semitone * semitone * semitone * semitone,
+    semitone * semitone * semitone * semitone * semitone * semitone * semitone * semitone * semitone,
+    semitone * semitone * semitone * semitone * semitone * semitone * semitone * semitone * semitone * semitone,
+    semitone * semitone * semitone * semitone * semitone * semitone * semitone * semitone * semitone * semitone * semitone,
+    semitone * semitone * semitone * semitone * semitone * semitone * semitone * semitone * semitone * semitone * semitone * semitone,
+};
+
+float annoying(float t, float startFreq)
+{
+    float env = envAdsr(t, 0.1f, 0.3f, 0.5f, 0.9f);
+    float sample = 0.9f * square(t, startFreq);
+    sample += 1.0f * square(t, startFreq * note_multipliers[3]);
+    sample += 0.8f * square(t, startFreq * note_multipliers[7]);
+    sample += 0.6f * square(t, startFreq * 2.0f);
+    //sample += 0.3f * square(t, startFreq * 2.1f);
+    //sample += 0.2f * square(t, startFreq * 3.9f);
+    sample += 0.8f * square(t, startFreq * 4.0f);
+    sample /= 6.0f;
+    clamp(sample, 0.0f, 1.0f);
+    return env * sample;
+}
+
 void synth_init()
 {
     initNoiseBuffer();
@@ -201,6 +269,36 @@ void synth_generate(ADSR adsr)
         buffer[i] = static_cast<int16_t>(sample * 32767);
         clamp(buffer[i], int16_t(-32767), int16_t(32767));
     }
+}
+
+using sample_func = float(*)(float t, float freq);
+static constexpr sample_func samples[] = {
+    silence,
+    kick,
+    snare,
+    hihat,
+    annoying,
+    noise,
+};
+
+void synth_generate(const track& track)
+{
+    const size_t buffer_size = static_cast<size_t>(ROWS_PER_TRACK * SAMPLE_RATE * BEAT_DURATION_SEC * NUM_CHANNELS);
+    uint16_t *track_buffer = new uint16_t[buffer_size];
+    uint16_t *current_sample = track_buffer;
+    for (const auto& row : track.rows)
+    {
+        for (size_t i = 0; i < SAMPLES_PER_ROW; ++i)
+        {
+            float t = static_cast<float>(i) / SAMPLES_PER_ROW;
+            for (size_t c = 0; c < NUM_CHANNELS; ++c)
+            {
+                *current_sample++ = static_cast<int16_t>(samples[row.sample_id](t, row.note) * 32767);
+            }
+        }
+    }
+
+    sound_queue_buffer(track_buffer, buffer_size * BYTE_PER_SAMPLE);
 }
 
 void synth_play()
