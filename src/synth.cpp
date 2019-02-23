@@ -1,103 +1,209 @@
-#include <Windows.h>
+#include "synth.h"
+
+#include "sound.h"
+
 #include <cstdint>
-#include <atomic>
-#include <iostream>
+#include <cmath>
 
-static HWAVEOUT hwo = 0;
+#include <Windows.h>
 
-static constexpr uint8_t NUM_HEADERS = 8;
-WAVEHDR headers[NUM_HEADERS];
-std::atomic_int_fast8_t free_header_count = NUM_HEADERS;
-std::atomic_int_fast8_t current_header = 0;
+static constexpr float PI = 3.14159265f;
 
-void CALLBACK waveOutProc(
-    HWAVEOUT  hwoo,
-    UINT      uMsg,
-    DWORD_PTR dwInstance,
-    DWORD_PTR dwParam1,
-    DWORD_PTR dwParam2
-) {
-    switch (uMsg)
-    {
-    case WOM_CLOSE:
-        std::cout << "[callback] device closed" << std::endl;
+static constexpr uint32_t SAMPLE_RATE = 44100;
 
-        break;
-    case WOM_OPEN:
-        std::cout << "[callback] device opened" << std::endl;
-        break;
-    case WOM_DONE:
-        {
-            std::cout << "[callback] header done" << std::endl; 
-            ++free_header_count;
-        }
-        uMsg *= 1;
-        break;
-    default:
-        uMsg *= 1;
-        uMsg;
-    }
-    hwoo;
-    uMsg;
-    dwInstance;
-    dwParam1;
-    dwParam2;
+static constexpr size_t BPM = 120;
+static constexpr size_t MEASURES = 1;
+static constexpr size_t METER_IN_4TH = 1;
+static constexpr float BEAT_DURATION_SEC = 60.0 / BPM;
+static constexpr size_t BEATS_TOTAL = MEASURES * METER_IN_4TH;
+static constexpr float DURATION_SEC = BEATS_TOTAL * BEAT_DURATION_SEC;
+static constexpr size_t NUM_CHANNELS = 2;
+static constexpr size_t BYTE_PER_SAMPLE = 2;
+static constexpr size_t BITS_PER_SAMPLE = BYTE_PER_SAMPLE * 8;
+static constexpr size_t SAMPLE_COUNT = static_cast<size_t>(SAMPLE_RATE * NUM_CHANNELS * DURATION_SEC);
+static constexpr size_t SAMPLE_OFFSET = 0;// 44 / BYTE_PER_SAMPLE; // WAV_HEADER is 44 bytes, so 22 uint16 elements
+static constexpr size_t BUFFER_COUNT = SAMPLE_OFFSET + SAMPLE_COUNT;
+
+static float noise_buffer[SAMPLE_RATE];
+
+// platform is little-endian, so least significant byte comes first in memory
+// => bytes are reversed when specifying multiple bytes as one int
+static constexpr uint32_t WAV_HEADER[] = {
+    // Main chunk
+    0x46464952, // ChunkId = "RIFF"
+    BUFFER_COUNT * BYTE_PER_SAMPLE - 8,// ChunkSize, size of the main chunk, excluding the first two 4-byte fields
+    0x45564157, // Format = "WAVE"
+    // WAVE format has 2 sub chunks, fmt and data
+
+    // Sub chunk fmt
+    0x20746d66, // SubChunkId = "fmt "
+    16, // SubChunkSize, size of sub chunk, excluding the first two 4-byte fields
+    NUM_CHANNELS << 16 | 1, // 2 bytes AudioFormat = 1 for PCM, 2 bytes NumChannels,
+    SAMPLE_RATE, // SampleRate
+    SAMPLE_RATE * NUM_CHANNELS * BYTE_PER_SAMPLE, // ByteRate = SampleRate * NumChannels * BytesPerSample
+    BITS_PER_SAMPLE << 16 | NUM_CHANNELS * BYTE_PER_SAMPLE, // 2 bytes BlockAlign = NumChannels * BytesPerSample, 2 bytes BitsPerSample
+
+    // Sub chunk data
+    0x61746164, // SubChunkId = "data"
+    SAMPLE_COUNT * BYTE_PER_SAMPLE,// SubChunkSize, size of sub chunk, excluding the first two 4-byte fields
 };
 
-void open_device(uint16_t num_channels, uint16_t sample_rate, uint16_t sample_bytes)
+template <typename T>
+void clamp(T& x, const T& min, const T& max)
 {
-    WAVEFORMATEX fmt{};
-    fmt.wBitsPerSample = sample_bytes * 8;
-    fmt.wFormatTag = WAVE_FORMAT_PCM;
-    fmt.nChannels = num_channels;
-    fmt.nSamplesPerSec = sample_rate;
-    fmt.nAvgBytesPerSec = sample_rate * num_channels * sample_bytes;
-    fmt.nBlockAlign = num_channels * sample_bytes;
-
-    waveOutOpen(&hwo, WAVE_MAPPER, &fmt, reinterpret_cast<DWORD_PTR>(&waveOutProc), 0, CALLBACK_FUNCTION);
+    x = x > max ? max : x;
+    x = x < min ? min : x;
 }
 
-void close_device()
+float interpolate(float v0, float v1, float x, float x0 = 0.0, float x1 = 1.0)
 {
-    while (free_header_count < NUM_HEADERS)
-    {
-        Sleep(10);
-    }
-    for (size_t i = 0; i < NUM_HEADERS; ++i)
-    {
-        if (headers[i].dwFlags & WHDR_PREPARED)
-        {
-            std::cout << "[close] unpreparing header " << i << std::endl;
-            waveOutUnprepareHeader(hwo, &headers[i], sizeof(WAVEHDR));
-        }
-    }
-    waveOutClose(hwo);
+    float fac = x / (x1 - x0);
+    return (1.0f - fac) * v0 + fac * v1;
 }
 
-void play_sound(void* const buffer, uint32_t bytes)
+float rand(float x)
 {
-    if (--free_header_count >= 0)
+    float dummy;
+    return std::modff(std::sin(x*2357911.13f)*1113171.9f, &dummy);
+}
+
+void initNoiseBuffer()
+{
+    static bool initialized = false;
+    if (!initialized) {
+        std::srand(42);
+    }
+
+    for (size_t i = 0; i < SAMPLE_RATE; ++i)
     {
-        auto hdr_id = (++current_header) % NUM_HEADERS;
-        WAVEHDR& hdr = headers[hdr_id];
-        if (hdr.dwFlags & WHDR_PREPARED)
-        {
-            std::cout << "[play] unpreparing header" << std::endl;
-            waveOutUnprepareHeader(hwo, &hdr, sizeof(WAVEHDR));
-        }
-        //hdr.dwLoops = static_cast<DWORD>(-1);
-        hdr.lpData = reinterpret_cast<LPSTR>(buffer);
-        hdr.dwBufferLength = bytes;
-        //hdr.dwFlags = WHDR_BEGINLOOP | WHDR_ENDLOOP;
-        waveOutPrepareHeader(hwo, &hdr, sizeof(WAVEHDR));
-        waveOutWrite(hwo, &hdr, sizeof(WAVEHDR));
-        //Sleep(static_cast<DWORD>(2000 + 50));
-        waveOutUnprepareHeader(hwo, &hdr, sizeof(WAVEHDR));
+        noise_buffer[i] = -1.0f + 2.0f * (static_cast<float>(std::rand()) / RAND_MAX);
+    }
+
+    initialized = true;
+}
+
+float envSqrt(float period)
+{
+    period = period < 0.5 ? period : 1.0f - period;
+    return sqrtf(2.0f * period);
+}
+
+float envSq(float period)
+{
+    period = period < 0.5 ? period : 1.0f - period;
+    return period * period * 4.0f;
+}
+
+float envAdsr(float period, float attack, float decay, float sustainLevel, float release)
+{
+    if (period <= attack)
+    {
+        return period / attack;
+    }
+    else if (period <= decay)
+    {
+        return 1.0f - (1.0f - sustainLevel) * ((period - attack) / (decay - attack));
+    }
+    else if (period <= release)
+    {
+        return sustainLevel;
     }
     else
     {
-        std::cout << "[play] no free header" << std::endl;
-        ++free_header_count;
-        return;
+        return sustainLevel - sustainLevel * (period - release) / max(1.0f - release, 0.00001f);
     }
+}
+
+float compress(float x, float threshold, float reduction)
+{
+    static float peak = 0.0f;
+    peak = std::fmaxf(std::fabsf(x), peak);
+    x = peak > threshold ? x * (1.0f / reduction) : x;
+    peak -= 1.0f / (2.0f * 44100.0f);
+    return x;
+}
+
+float square(float t, float frequency, float flip = 0.5f)
+{
+    float dummy;
+    return std::modff(t * frequency, &dummy) < flip ? -1.0f : 1.0f;
+}
+
+float sin(float t, float frequency)
+{
+    return std::sinf(t * frequency * PI * 2.0f);
+}
+
+float silence(float /*t*/, float /*freq*/)
+{
+    return 0.0f;
+}
+
+float noise(float t, float freq)
+{
+    clamp(t, 0.0f, 1.0f);
+    clamp(freq, 0.0f, static_cast<float>(SAMPLE_RATE));
+    float noiseT = t * freq;
+    size_t i = static_cast<size_t>(noiseT);
+    float fac = noiseT - i;
+    float n0 = noise_buffer[i];
+    float n1 = noise_buffer[(i + 1) % SAMPLE_RATE];
+
+    return interpolate(n0, n1, fac);
+}
+
+float kick(float t, float startFreq)
+{
+    float env = envAdsr(t, 0.0f, 0.0f, 1.0f, 0.95f);
+
+    float lowBoomEnv = std::expf(-1.5f*t);
+    float freqFalloff = std::expf(-0.45f*t);
+    float lowBoom = lowBoomEnv * std::sinf(2.0f * PI * startFreq * freqFalloff);
+
+    float punchT = t * 400.0f;
+    float punchEnv = std::expf(-0.95f*punchT);
+    clamp(punchT, 0.0f, 1.0f);
+    float punch = punchEnv * noise(t, 240.0) * 0.7f;
+
+    float slapT = t * 400.0f;
+    float slapFalloff = std::expf(-0.25f*slapT);
+    clamp(slapT, 0.0f, 1.0f);
+    float slap = slapFalloff * noise(t, 5000.0f) * 0.3f;
+
+    return env * (lowBoom + punch + slap);
+}
+
+void synth_init()
+{
+    initNoiseBuffer();
+    sound_open_device(SAMPLE_RATE, BYTE_PER_SAMPLE, NUM_CHANNELS);
+}
+
+void synth_deinit()
+{
+    sound_close_device();
+}
+
+int16_t buffer[BUFFER_COUNT];
+
+void synth_generate(ADSR adsr)
+{
+    float frequency = 440.0;
+    float dummy;
+    for (size_t i = 0; i < BUFFER_COUNT; ++i) {
+        float t = static_cast<float>(i / NUM_CHANNELS) / SAMPLE_RATE;
+        float period = std::modff(t / BEAT_DURATION_SEC, &dummy);
+        frequency = 220.0f * pow(1.0594631f, dummy);
+        float env = envAdsr(period, adsr.a, adsr.d, adsr.s, adsr.r);
+        float level = (1.0f / 3.0f);
+        float sample = level * env * kick(period, 60.0f);
+        //sample = compress(sample, 0.8f, 4.0f);
+        buffer[i] = static_cast<int16_t>(sample * 32767);
+        clamp(buffer[i], int16_t(-32767), int16_t(32767));
+    }
+}
+
+void synth_play()
+{
+    sound_queue_buffer(buffer, BUFFER_COUNT * 2);
 }
