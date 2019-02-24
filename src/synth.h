@@ -30,9 +30,10 @@ struct modifier_params
 struct sound_desc
 {
     uint8_t base_sound_id;
+    float amplitude;
+    float frequency;
     uint8_t frequency_modifier_id;
     uint8_t amplitude_modifier_id;
-    float amplitude;
     modifier_params frequency_modifier_params;
     modifier_params amplitude_modifier_params;
 };

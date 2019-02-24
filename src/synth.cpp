@@ -312,6 +312,7 @@ static constexpr sample_func base_sounds[] = {
 
 using modifier_func = float(*)(float t);
 static constexpr modifier_func base_modifiers[] = {
+    [](float /*t*/) -> float { return 1.0f; },
     envSq,
     envSqrt,
     // exp(-x) is 0.01 at x=4.60517
@@ -330,11 +331,21 @@ int16_t* synth_generate_sound(const sound_desc* sound_desc, uint8_t num_sound_de
         for (uint8_t i = 0; i < num_sound_descs; ++i)
         {
             float t = static_cast<float>(s) / sample_count;
-            float sample = base_sounds[sound_desc[i].base_sound_id](t, 440.0f);
-            sample *= sound_desc[i].amplitude;
+
+            float frequency = sound_desc[i].frequency;
+            float frequency_modifier_t = interpolate(0.0f, 1.0f, t, sound_desc[i].frequency_modifier_params.begin, sound_desc[i].frequency_modifier_params.end);
+            clamp(frequency_modifier_t, 0.0f, 1.0f);
+            float frequency_modifier = base_modifiers[sound_desc[i].frequency_modifier_id](frequency_modifier_t);
+            frequency *= frequency_modifier;
+
+            float amplitude = sound_desc[i].amplitude;
             float amplitude_modifier_t = interpolate(0.0f, 1.0f, t, sound_desc[i].amplitude_modifier_params.begin, sound_desc[i].amplitude_modifier_params.end);
+            clamp(amplitude_modifier_t, 0.0f, 1.0f);
             float amplitude_modifier = base_modifiers[sound_desc[i].amplitude_modifier_id](amplitude_modifier_t);
-            sample *= amplitude_modifier;
+            amplitude *= amplitude_modifier;
+
+            float sample = amplitude * base_sounds[sound_desc[i].base_sound_id](t, frequency);
+
             for (uint8_t c = 0; c < NUM_CHANNELS; ++c)
             {
                 sound_buffer[s * NUM_CHANNELS + c] += static_cast<int16_t>(sample * 32767);

@@ -27,20 +27,29 @@ int main()
         }
     };
     int16_t* track_buffer = synth_generate_track(track);
-    synth_queue_track(track_buffer, 2);
+   // synth_queue_track(track_buffer, 2);
 
-    sound_desc desc0;
-    desc0.amplitude = 1.0f;
-    desc0.amplitude_modifier_id = 2;
+    sound_desc desc0 = {};
+    desc0.amplitude = 0.5f;
+    desc0.frequency = 440.0f;
+    desc0.amplitude_modifier_id = 3;
     desc0.amplitude_modifier_params = { 0.0f, 1.0f };
     desc0.base_sound_id = 0;
+
+    sound_desc desc1 = {};
+    desc1.amplitude = 0.5f;
+    desc1.frequency = 880.0f / 3.0f;
+    desc1.frequency_modifier_id = 3;
+    desc1.frequency_modifier_params = { 0.25f, 0.75f };
+    desc1.base_sound_id = 0;
     
-    sound_desc desc[] = {
+    sound_desc descs[] = {
         desc0,
+        desc1,
     };
 
-    int16_t* sound_buffer = synth_generate_sound(desc, 1);
-    synth_queue_sound(sound_buffer, 12);
+    int16_t* sound_buffer = synth_generate_sound(descs, sizeof(descs)/sizeof(descs[0]));
+    synth_queue_sound(sound_buffer, 4);
 
     synth_deinit();
     delete[] track_buffer;
