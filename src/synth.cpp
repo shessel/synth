@@ -60,7 +60,7 @@ void clamp(T& x, const T& min, const T& max)
 
 float interpolate(float v0, float v1, float x, float x0 = 0.0, float x1 = 1.0)
 {
-    float fac = x / (x1 - x0);
+    float fac = (x - x0) / (x1 - x0);
     return (1.0f - fac) * v0 + fac * v1;
 }
 
