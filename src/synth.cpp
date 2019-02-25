@@ -10,7 +10,7 @@
 
 static constexpr float PI = 3.14159265f;
 
-static constexpr uint32_t SAMPLE_RATE = 44100;
+static constexpr uint32_t SAMPLE_RATE = 44'100;
 
 static constexpr size_t BPM = 120;
 static constexpr size_t MEASURES = 1;
@@ -26,30 +26,6 @@ static constexpr size_t SAMPLES_PER_TRACK = ROWS_PER_TRACK * SAMPLES_PER_ROW;
 static constexpr size_t SAMPLE_COUNT = static_cast<size_t>(SAMPLE_RATE * NUM_CHANNELS * DURATION_SEC);
 static constexpr size_t SAMPLE_OFFSET = 0;// 44 / BYTES_PER_SAMPLE; // WAV_HEADER is 44 bytes, so 22 uint16 elements
 static constexpr size_t BUFFER_COUNT = SAMPLE_OFFSET + SAMPLE_COUNT;
-
-static float noise_buffer[SAMPLE_RATE];
-
-// platform is little-endian, so least significant byte comes first in memory
-// => bytes are reversed when specifying multiple bytes as one int
-static constexpr uint32_t WAV_HEADER[] = {
-    // Main chunk
-    0x46464952, // ChunkId = "RIFF"
-    BUFFER_COUNT * BYTES_PER_SAMPLE - 8,// ChunkSize, size of the main chunk, excluding the first two 4-byte fields
-    0x45564157, // Format = "WAVE"
-    // WAVE format has 2 sub chunks, fmt and data
-
-    // Sub chunk fmt
-    0x20746d66, // SubChunkId = "fmt "
-    16, // SubChunkSize, size of sub chunk, excluding the first two 4-byte fields
-    NUM_CHANNELS << 16 | 1, // 2 bytes AudioFormat = 1 for PCM, 2 bytes NumChannels,
-    SAMPLE_RATE, // SampleRate
-    SAMPLE_RATE * NUM_CHANNELS * BYTES_PER_SAMPLE, // ByteRate = SampleRate * NumChannels * BytesPerSample
-    BITS_PER_SAMPLE << 16 | NUM_CHANNELS * BYTES_PER_SAMPLE, // 2 bytes BlockAlign = NumChannels * BytesPerSample, 2 bytes BitsPerSample
-
-    // Sub chunk data
-    0x61746164, // SubChunkId = "data"
-    SAMPLE_COUNT * BYTES_PER_SAMPLE,// SubChunkSize, size of sub chunk, excluding the first two 4-byte fields
-};
 
 template <typename T>
 void clamp(T& x, const T& min, const T& max)
@@ -70,34 +46,36 @@ float rand(float x)
     return std::modff(std::sin(x*2357911.13f)*1113171.9f, &dummy);
 }
 
-void initNoiseBuffer()
+static float noise_buffer[SAMPLE_RATE];
+
+void init_noise_buffer()
 {
     static bool initialized = false;
     if (!initialized) {
         std::srand(42);
-    }
 
-    for (size_t i = 0; i < SAMPLE_RATE; ++i)
-    {
-        noise_buffer[i] = -1.0f + 2.0f * (static_cast<float>(std::rand()) / RAND_MAX);
-    }
+        for (size_t i = 0; i < SAMPLE_RATE; ++i)
+        {
+            noise_buffer[i] = -1.0f + 2.0f * (static_cast<float>(std::rand()) / RAND_MAX);
+        }
 
-    initialized = true;
+        initialized = true;
+    }
 }
 
-float envSqrt(float period)
+float env_sqrt(float period)
 {
     period = period < 0.5 ? period : 1.0f - period;
     return sqrtf(2.0f * period);
 }
 
-float envSq(float period)
+float env_sq(float period)
 {
     period = period < 0.5 ? period : 1.0f - period;
     return period * period * 4.0f;
 }
 
-float envAdsr(float period, float attack, float decay, float sustainLevel, float release)
+float env_adsr(float period, float attack, float decay, float sustainLevel, float release)
 {
     if (period <= attack)
     {
@@ -126,16 +104,16 @@ float compress(float x, float threshold, float reduction)
     return x;
 }
 
-float square(float t, float frequency)
+float square(float t, float frequency, float phase = 0.0f)
 {
     float flip = 0.5f;
     float dummy;
-    return std::modff(t * frequency, &dummy) < flip ? -1.0f : 1.0f;
+    return std::modff(t * frequency + phase, &dummy) < flip ? -1.0f : 1.0f;
 }
 
-float sin(float t, float frequency)
+float sin(float t, float frequency, float phase = 0.0f)
 {
-    return std::sinf(t * frequency * PI * 2.0f);
+    return std::sinf(t * frequency * PI * 2.0f + phase);
 }
 
 float silence(float /*t*/, float /*freq*/)
@@ -143,22 +121,20 @@ float silence(float /*t*/, float /*freq*/)
     return 0.0f;
 }
 
-float noise(float t, float freq)
+float noise(float t, float freq, float phase = 0.0f)
 {
-    clamp(t, 0.0f, 1.0f);
-    clamp(freq, 0.0f, static_cast<float>(SAMPLE_RATE));
-    float noiseT = t * freq;
+    float dummy;
+    float noiseT = std::modff(t * freq + phase, &dummy);
     size_t i = static_cast<size_t>(noiseT);
-    float fac = noiseT - i;
     float n0 = noise_buffer[i];
     float n1 = noise_buffer[(i + 1) % SAMPLE_RATE];
 
-    return interpolate(n0, n1, fac);
+    return interpolate(n0, n1, noiseT);
 }
 
 float kick(float t, float startFreq)
 {
-    float env = envAdsr(t, 0.0f, 0.0f, 1.0f, 0.95f);
+    float env = env_adsr(t, 0.0f, 0.0f, 1.0f, 0.95f);
 
     float lowBoomEnv = std::expf(-1.5f*t);
     float freqFalloff = std::expf(-0.45f*t);
@@ -179,7 +155,7 @@ float kick(float t, float startFreq)
 
 float hihat(float t, float startFreq)
 {
-    float env = envAdsr(t, 0.0f, 0.0f, 1.0f, 0.95f);
+    float env = env_adsr(t, 0.0f, 0.0f, 1.0f, 0.95f);
 
     float punchT = t * 80.0f;
     float punchEnv = std::expf(-0.65f*punchT);
@@ -196,7 +172,7 @@ float hihat(float t, float startFreq)
 
 float snare(float t, float startFreq)
 {
-    float env = envAdsr(t, 0.0f, 0.0f, 1.0f, 0.95f);
+    float env = env_adsr(t, 0.0f, 0.0f, 1.0f, 0.95f);
 
     float punchEnv = std::expf(-11.0f*t);
     float punch = punchEnv * noise(t, startFreq);
@@ -231,7 +207,7 @@ static constexpr float note_multipliers[] = {
 
 float annoying(float t, float startFreq)
 {
-    float env = envAdsr(t, 0.1f, 0.3f, 0.5f, 0.9f);
+    float env = env_adsr(t, 0.1f, 0.3f, 0.5f, 0.9f);
     float sample = 0.9f * square(t, startFreq);
     sample += 1.0f * square(t, startFreq * note_multipliers[3]);
     sample += 0.8f * square(t, startFreq * note_multipliers[7]);
@@ -246,7 +222,7 @@ float annoying(float t, float startFreq)
 
 void synth_init()
 {
-    initNoiseBuffer();
+    init_noise_buffer();
     sound_open_device(SAMPLE_RATE, BYTES_PER_SAMPLE, NUM_CHANNELS);
 }
 
@@ -265,7 +241,7 @@ void synth_generate(ADSR adsr)
         float t = static_cast<float>(i / NUM_CHANNELS) / SAMPLE_RATE;
         float period = std::modff(t / BEAT_DURATION_SEC, &dummy);
         frequency = 220.0f * pow(1.0594631f, dummy);
-        float env = envAdsr(period, adsr.a, adsr.d, adsr.s, adsr.r);
+        float env = env_adsr(period, adsr.a, adsr.d, adsr.s, adsr.r);
         float level = (1.0f / 3.0f);
         float sample = level * env * kick(period, 60.0f);
         //sample = compress(sample, 0.8f, 4.0f);
@@ -274,14 +250,14 @@ void synth_generate(ADSR adsr)
     }
 }
 
-using sample_func = float(*)(float t, float freq);
+using sample_func = float(*)(float t, float base_freq);
 static constexpr sample_func samples[] = {
     silence,
     kick,
     snare,
     hihat,
     annoying,
-    noise,
+    [](float t, float freq) { return noise(t, freq); }
 };
 
 int16_t* synth_generate_track(const track& track)
@@ -304,7 +280,8 @@ int16_t* synth_generate_track(const track& track)
     return track_buffer;
 }
 
-static constexpr sample_func base_sounds[] = {
+using base_sound_func = float(*)(float t, float freq, float phase);
+static constexpr base_sound_func base_sounds[] = {
     sin,
     square,
     noise,
@@ -313,10 +290,10 @@ static constexpr sample_func base_sounds[] = {
 using modifier_func = float(*)(float t);
 static constexpr modifier_func base_modifiers[] = {
     [](float /*t*/) -> float { return 1.0f; },
-    envSq,
-    envSqrt,
+    env_sq,
+    env_sqrt,
     // exp(-x) is 0.01 at x=4.60517
-    [](float t) -> float { return (1.0f/0.99f) * std::expf(-t*4.60517f) - 0.01f; },
+    [](float t) -> float { return (std::expf(-t*4.60517f) - 0.01f) / 0.99f; },
 };
 
 int16_t* synth_generate_sound(const sound_desc* sound_desc, uint8_t num_sound_descs)
@@ -326,30 +303,31 @@ int16_t* synth_generate_sound(const sound_desc* sound_desc, uint8_t num_sound_de
     int16_t* sound_buffer = new int16_t[buffer_count];
     std::memset(sound_buffer, 0, buffer_count * BYTES_PER_SAMPLE);
 
-    for (size_t s = 0; s < sample_count; ++s)
+    for (uint8_t i = 0; i < num_sound_descs; ++i)
     {
-        for (uint8_t i = 0; i < num_sound_descs; ++i)
+        float phase = 0.0f;
+        float t_inc = 1.0f / SAMPLE_RATE;
+        for (size_t s = 0; s < sample_count; ++s)
         {
             float t = static_cast<float>(s) / sample_count;
 
             float frequency = sound_desc[i].frequency;
             float frequency_modifier_t = interpolate(0.0f, 1.0f, t, sound_desc[i].frequency_modifier_params.begin, sound_desc[i].frequency_modifier_params.end);
             clamp(frequency_modifier_t, 0.0f, 1.0f);
-            float frequency_modifier = base_modifiers[sound_desc[i].frequency_modifier_id](frequency_modifier_t);
-            frequency *= frequency_modifier;
+            frequency = interpolate(sound_desc[i].frequency_min, frequency, base_modifiers[sound_desc[i].frequency_modifier_id](frequency_modifier_t));
 
             float amplitude = sound_desc[i].amplitude;
             float amplitude_modifier_t = interpolate(0.0f, 1.0f, t, sound_desc[i].amplitude_modifier_params.begin, sound_desc[i].amplitude_modifier_params.end);
             clamp(amplitude_modifier_t, 0.0f, 1.0f);
-            float amplitude_modifier = base_modifiers[sound_desc[i].amplitude_modifier_id](amplitude_modifier_t);
-            amplitude *= amplitude_modifier;
+            amplitude = interpolate(sound_desc[i].amplitude_min, 1.0f, base_modifiers[sound_desc[i].amplitude_modifier_id](amplitude_modifier_t));
 
-            float sample = amplitude * base_sounds[sound_desc[i].base_sound_id](t, frequency);
+            float sample = amplitude * base_sounds[sound_desc[i].base_sound_id](0.0f, 0.0f, phase);
 
             for (uint8_t c = 0; c < NUM_CHANNELS; ++c)
             {
                 sound_buffer[s * NUM_CHANNELS + c] += static_cast<int16_t>(sample * 32767);
             }
+            phase += t_inc * frequency * 2.0f * PI;
         }
     }
 

@@ -32,6 +32,8 @@ struct sound_desc
     uint8_t base_sound_id;
     float amplitude;
     float frequency;
+    float amplitude_min;
+    float frequency_min;
     uint8_t frequency_modifier_id;
     uint8_t amplitude_modifier_id;
     modifier_params frequency_modifier_params;
