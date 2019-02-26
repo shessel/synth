@@ -105,3 +105,8 @@ void sound_queue_buffer(void* const buffer, uint32_t bytes, uint32_t loop_count)
         return;
     }
 }
+
+void sound_end_current_loop()
+{
+    waveOutBreakLoop(hwo);
+}

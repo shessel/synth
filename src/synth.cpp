@@ -123,13 +123,13 @@ float silence(float /*t*/, float /*freq*/)
 
 float noise(float t, float freq, float phase = 0.0f)
 {
-    float dummy;
-    float noiseT = std::modff(t * freq + phase, &dummy);
+    float noiseT = t * freq + phase * freq;
     size_t i = static_cast<size_t>(noiseT);
-    float n0 = noise_buffer[i];
+    float fac = noiseT - i;
+    float n0 = noise_buffer[i % SAMPLE_RATE];
     float n1 = noise_buffer[(i + 1) % SAMPLE_RATE];
 
-    return interpolate(n0, n1, noiseT);
+    return interpolate(n0, n1, fac);
 }
 
 float kick(float t, float startFreq)
@@ -231,25 +231,6 @@ void synth_deinit()
     sound_close_device();
 }
 
-static int16_t s_buffer[BUFFER_COUNT];
-
-void synth_generate(ADSR adsr)
-{
-    float frequency = 440.0;
-    float dummy;
-    for (size_t i = 0; i < BUFFER_COUNT; ++i) {
-        float t = static_cast<float>(i / NUM_CHANNELS) / SAMPLE_RATE;
-        float period = std::modff(t / BEAT_DURATION_SEC, &dummy);
-        frequency = 220.0f * pow(1.0594631f, dummy);
-        float env = env_adsr(period, adsr.a, adsr.d, adsr.s, adsr.r);
-        float level = (1.0f / 3.0f);
-        float sample = level * env * kick(period, 60.0f);
-        //sample = compress(sample, 0.8f, 4.0f);
-        s_buffer[i] = static_cast<int16_t>(sample * 32767);
-        clamp(s_buffer[i], int16_t(-32767), int16_t(32767));
-    }
-}
-
 using sample_func = float(*)(float t, float base_freq);
 static constexpr sample_func samples[] = {
     silence,
@@ -296,11 +277,10 @@ static constexpr modifier_func base_modifiers[] = {
     [](float t) -> float { return (std::expf(-t*4.60517f) - 0.01f) / 0.99f; },
 };
 
-int16_t* synth_generate_sound(const sound_desc* sound_desc, uint8_t num_sound_descs)
+void synth_update_generated_sound(int16_t* const sound_buffer, const sound_desc* const sound_desc, const uint8_t num_sound_descs)
 {
     size_t sample_count = static_cast<size_t>(SAMPLE_RATE * BEAT_DURATION_SEC);
     size_t buffer_count = sample_count * NUM_CHANNELS;
-    int16_t* sound_buffer = new int16_t[buffer_count];
     std::memset(sound_buffer, 0, buffer_count * BYTES_PER_SAMPLE);
 
     for (uint8_t i = 0; i < num_sound_descs; ++i)
@@ -321,7 +301,7 @@ int16_t* synth_generate_sound(const sound_desc* sound_desc, uint8_t num_sound_de
             clamp(amplitude_modifier_t, 0.0f, 1.0f);
             amplitude = interpolate(sound_desc[i].amplitude_min, 1.0f, base_modifiers[sound_desc[i].amplitude_modifier_id](amplitude_modifier_t));
 
-            float sample = amplitude * base_sounds[sound_desc[i].base_sound_id](0.0f, 0.0f, phase);
+            float sample = amplitude * base_sounds[sound_desc[i].base_sound_id](0.0f, frequency, phase);
 
             for (uint8_t c = 0; c < NUM_CHANNELS; ++c)
             {
@@ -330,26 +310,33 @@ int16_t* synth_generate_sound(const sound_desc* sound_desc, uint8_t num_sound_de
             phase += t_inc * frequency * 2.0f * PI;
         }
     }
+}
 
+int16_t* synth_generate_sound(const sound_desc* const sound_desc, const uint8_t num_sound_descs)
+{
+    size_t sample_count = static_cast<size_t>(SAMPLE_RATE * BEAT_DURATION_SEC);
+    size_t buffer_count = sample_count * NUM_CHANNELS;
+    int16_t* sound_buffer = new int16_t[buffer_count];
+    synth_update_generated_sound(sound_buffer, sound_desc, num_sound_descs);
     return sound_buffer;
 }
 
-void synth_queue_track(int16_t* track_buffer, uint32_t loop_count)
+void synth_queue_track(int16_t* track_buffer, const uint32_t loop_count)
 {
     synth_play(track_buffer, SAMPLES_PER_TRACK * NUM_CHANNELS * BYTES_PER_SAMPLE, loop_count);
 }
 
-void synth_queue_sound(int16_t* sound_buffer, uint32_t loop_count)
+void synth_queue_sound(int16_t* sound_buffer, const uint32_t loop_count)
 {
     synth_play(sound_buffer, static_cast<uint32_t>(SAMPLE_RATE * BEAT_DURATION_SEC * NUM_CHANNELS * BYTES_PER_SAMPLE), loop_count);
 }
 
-void synth_play(int16_t* buffer, uint32_t buffer_size, uint32_t loop_count)
+void synth_play(int16_t* buffer, const uint32_t buffer_size, const uint32_t loop_count)
 {
-    if (!buffer)
-    {
-        buffer = s_buffer;
-        buffer_size = BUFFER_COUNT * BYTES_PER_SAMPLE;
-    }
     sound_queue_buffer(buffer, buffer_size, loop_count);
+}
+
+void synth_end_current_loop()
+{
+    sound_end_current_loop();
 }
