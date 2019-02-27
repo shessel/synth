@@ -113,7 +113,7 @@ float square(float t, float frequency, float phase = 0.0f)
 
 float sin(float t, float frequency, float phase = 0.0f)
 {
-    return std::sinf(t * frequency * PI * 2.0f + phase);
+    return std::sinf(t * frequency * PI * 2.0f + phase * 2.0f * PI);
 }
 
 float silence(float /*t*/, float /*freq*/)
@@ -291,15 +291,13 @@ void synth_update_generated_sound(int16_t* const sound_buffer, const sound_desc*
         {
             float t = static_cast<float>(s) / sample_count;
 
-            float frequency = sound_desc[i].frequency;
             float frequency_modifier_t = interpolate(0.0f, 1.0f, t, sound_desc[i].frequency_modifier_params.begin, sound_desc[i].frequency_modifier_params.end);
             clamp(frequency_modifier_t, 0.0f, 1.0f);
-            frequency = interpolate(sound_desc[i].frequency_min, frequency, base_modifiers[sound_desc[i].frequency_modifier_id](frequency_modifier_t));
+            float frequency = interpolate(sound_desc[i].frequency_min, sound_desc[i].frequency, base_modifiers[sound_desc[i].frequency_modifier_id](frequency_modifier_t));
 
-            float amplitude = sound_desc[i].amplitude;
             float amplitude_modifier_t = interpolate(0.0f, 1.0f, t, sound_desc[i].amplitude_modifier_params.begin, sound_desc[i].amplitude_modifier_params.end);
             clamp(amplitude_modifier_t, 0.0f, 1.0f);
-            amplitude = interpolate(sound_desc[i].amplitude_min, 1.0f, base_modifiers[sound_desc[i].amplitude_modifier_id](amplitude_modifier_t));
+            float amplitude = interpolate(sound_desc[i].amplitude_min, sound_desc[i].amplitude, base_modifiers[sound_desc[i].amplitude_modifier_id](amplitude_modifier_t));
 
             float sample = amplitude * base_sounds[sound_desc[i].base_sound_id](0.0f, frequency, phase);
 
@@ -307,7 +305,7 @@ void synth_update_generated_sound(int16_t* const sound_buffer, const sound_desc*
             {
                 sound_buffer[s * NUM_CHANNELS + c] += static_cast<int16_t>(sample * 32767);
             }
-            phase += t_inc * frequency * 2.0f * PI;
+            phase += t_inc * frequency;
         }
     }
 }
