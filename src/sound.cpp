@@ -75,7 +75,7 @@ void sound_close_device()
     waveOutClose(hwo);
 }
 
-void sound_queue_buffer(void* const buffer, uint32_t bytes)
+void sound_queue_buffer(void* const buffer, uint32_t bytes, uint32_t loop_count)
 {
     if (--free_header_count >= 0)
     {
@@ -86,10 +86,13 @@ void sound_queue_buffer(void* const buffer, uint32_t bytes)
             std::cout << "[play] unpreparing header" << std::endl;
             waveOutUnprepareHeader(hwo, &hdr, sizeof(WAVEHDR));
         }
-        //hdr.dwLoops = static_cast<DWORD>(-1);
+        hdr.dwLoops = loop_count;
         hdr.lpData = reinterpret_cast<LPSTR>(buffer);
         hdr.dwBufferLength = bytes;
-        //hdr.dwFlags = WHDR_BEGINLOOP | WHDR_ENDLOOP;
+        if (loop_count > 1)
+        {
+            hdr.dwFlags = WHDR_BEGINLOOP | WHDR_ENDLOOP;
+        }
         waveOutPrepareHeader(hwo, &hdr, sizeof(WAVEHDR));
         waveOutWrite(hwo, &hdr, sizeof(WAVEHDR));
         //Sleep(static_cast<DWORD>(2000 + 50));
